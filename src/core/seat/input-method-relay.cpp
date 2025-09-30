@@ -14,7 +14,7 @@ wf::input_method_relay::input_method_relay()
     {
         auto wlr_text_input = static_cast<wlr_text_input_v3*>(data);
         text_inputs.push_back(std::make_unique<wf::text_input>(this,
-            wlr_text_input));
+            wlr_text_input, 3));
         // Sometimes text_input is created after the surface, so we failed to
         // set_focus when the surface is focused. Try once here.
         //
@@ -31,6 +31,34 @@ wf::input_method_relay::input_method_relay()
                                 wl_resource_get_client(surface->resource)))
                 {
                     wlr_text_input_v3_send_enter(wlr_text_input, surface);
+                }
+            }
+        }
+    });
+
+    on_text_input_v1_new.set_callback([&] (void *data)
+    {
+        auto input = static_cast<wf_text_input_v1*>(data);
+        text_inputs.push_back(std::make_unique<wf::text_input>(this,
+            input, 1));
+        // Sometimes text_input is created after the surface, so we failed to
+        // set_focus when the surface is focused. Try once here.
+        //
+        // If no surface has been created, set_focus does nothing.
+        //
+        // Example apps (all GTK4): gnome-font-viewer, easyeffects
+        auto& seat = wf::get_core_impl().seat;
+        if (auto focus = seat->priv->keyboard_focus)
+        {
+            if (auto view = wf::node_to_view(focus))
+            {
+                auto surface = wf::node_to_view(focus)->get_keyboard_focus_surface();
+                if (surface && (wl_resource_get_client(input->resource) ==
+                                wl_resource_get_client(surface->resource)))
+                {
+                    input->focused_surface = surface;
+                    wl_signal_add(&input->focused_surface->events.destroy, &input->surface_destroy);
+                    zwp_text_input_v1_send_enter(input->resource, surface->resource);
                 }
             }
         }
@@ -59,10 +87,15 @@ wf::input_method_relay::input_method_relay()
         auto *text_input = find_focusable_text_input();
         if (text_input)
         {
-            wlr_text_input_v3_send_enter(
-                text_input->input,
-                text_input->pending_focused_surface);
-            text_input->set_pending_focused_surface(nullptr);
+            if (text_input->tiv_version == 3) {
+                wlr_text_input_v3_send_enter(
+                    static_cast<wlr_text_input_v3*>(text_input->input),
+                    text_input->pending_focused_surface);
+                text_input->set_pending_focused_surface(nullptr);
+            } else {
+                zwp_text_input_v1_send_enter(text_input->input->resource, text_input->pending_focused_surface->resource);
+                text_input->set_pending_focused_surface(nullptr);
+            }
         }
     });
 
@@ -91,27 +124,52 @@ wf::input_method_relay::input_method_relay()
 
         if (input_method->current.preedit.text)
         {
-            wlr_text_input_v3_send_preedit_string(text_input->input,
-                input_method->current.preedit.text,
-                input_method->current.preedit.cursor_begin,
-                input_method->current.preedit.cursor_end);
+            if (text_input->tiv_version == 3) {
+                wlr_text_input_v3_send_preedit_string(
+                    static_cast<wlr_text_input_v3*>(text_input->input),
+                    input_method->current.preedit.text,
+                    input_method->current.preedit.cursor_begin,
+                    input_method->current.preedit.cursor_end);
+            } else {
+                zwp_text_input_v1_send_preedit_string(text_input->input->resource,
+                    text_input->input->current_serial,
+                    input_method->current.preedit.text,
+                    "");
+            }
         }
 
         if (input_method->current.commit_text)
         {
-            wlr_text_input_v3_send_commit_string(text_input->input,
-                input_method->current.commit_text);
+            if (text_input->tiv_version == 3) {
+                wlr_text_input_v3_send_commit_string(
+                    static_cast<wlr_text_input_v3*>(text_input->input),
+                    input_method->current.commit_text);
+            } else {
+                zwp_text_input_v1_send_commit_string(text_input->input->resource,
+                    text_input->input->current_serial,
+                    input_method->current.commit_text);
+            }
         }
 
         if (input_method->current.delete_.before_length ||
             input_method->current.delete_.after_length)
         {
-            wlr_text_input_v3_send_delete_surrounding_text(text_input->input,
-                input_method->current.delete_.before_length,
-                input_method->current.delete_.after_length);
+            if (text_input->tiv_version == 3) {
+                wlr_text_input_v3_send_delete_surrounding_text(
+                    static_cast<wlr_text_input_v3*>(text_input->input),
+                    input_method->current.delete_.before_length,
+                    input_method->current.delete_.after_length);
+            } else {
+                zwp_text_input_v1_send_delete_surrounding_text(
+                    text_input->input->resource,
+                    input_method->current.delete_.before_length,
+                    input_method->current.delete_.after_length
+                );
+            }
         }
-
-        wlr_text_input_v3_send_done(text_input->input);
+        if (text_input->tiv_version == 3) {
+            wlr_text_input_v3_send_done(static_cast<wlr_text_input_v3*>(text_input->input));
+        }
     });
 
     on_input_method_destroy.set_callback([&] (void *data)
@@ -134,7 +192,11 @@ wf::input_method_relay::input_method_relay()
              * returns */
             text_input->set_pending_focused_surface(text_input->input->
                 focused_surface);
-            wlr_text_input_v3_send_leave(text_input->input);
+            if (text_input->tiv_version == 3) {
+                wlr_text_input_v3_send_leave(static_cast<wlr_text_input_v3*>(text_input->input));
+            } else {
+                zwp_text_input_v1_send_leave(text_input->input->resource);
+            }
         }
     });
 
@@ -172,13 +234,19 @@ wf::input_method_relay::input_method_relay()
     auto& core = wf::get_core();
     if (core.protocols.text_input && core.protocols.input_method)
     {
+        LOGD(wf::get_core().protocols.text_input);
+        LOGD(wf::get_core().protocols.text_input_v1);
         on_text_input_new.connect(&wf::get_core().protocols.text_input->events.text_input);
         on_input_method_new.connect(&wf::get_core().protocols.input_method->events.input_method);
         wf::get_core().connect(&keyboard_focus_changed);
     }
+    if (core.protocols.text_input_v1)
+    {
+        on_text_input_v1_new.connect(&wf::get_core().protocols.text_input_v1->events.text_input);
+    }
 }
 
-void wf::input_method_relay::send_im_state(wlr_text_input_v3 *input)
+void wf::input_method_relay::send_im_state(text_input_base_t *input)
 {
     wlr_input_method_v2_send_surrounding_text(
         input_method,
@@ -201,7 +269,7 @@ void wf::input_method_relay::send_im_done()
     wlr_input_method_v2_send_done(input_method);
 }
 
-void wf::input_method_relay::disable_text_input(wlr_text_input_v3 *input)
+void wf::input_method_relay::disable_text_input(text_input_base_t *input)
 {
     if (input_method == nullptr)
     {
@@ -223,7 +291,7 @@ void wf::input_method_relay::disable_text_input(wlr_text_input_v3 *input)
     send_im_state(input);
 }
 
-void wf::input_method_relay::remove_text_input(wlr_text_input_v3 *input)
+void wf::input_method_relay::remove_text_input(text_input_base_t *input)
 {
     auto it = std::remove_if(text_inputs.begin(),
         text_inputs.end(),
@@ -348,7 +416,11 @@ void wf::input_method_relay::set_focus(wlr_surface *surface)
             if (surface != text_input->input->focused_surface)
             {
                 disable_text_input(text_input->input);
-                wlr_text_input_v3_send_leave(text_input->input);
+                if (text_input->tiv_version==3) {
+                    wlr_text_input_v3_send_leave(static_cast<wlr_text_input_v3*>(text_input->input));
+                } else {
+                    zwp_text_input_v1_send_leave(text_input->input->resource);
+                }
             } else
             {
                 LOGD("set_focus an already focused surface");
@@ -361,7 +433,11 @@ void wf::input_method_relay::set_focus(wlr_surface *surface)
         {
             if (input_method)
             {
-                wlr_text_input_v3_send_enter(text_input->input, surface);
+                if (text_input->tiv_version == 3) {
+                    wlr_text_input_v3_send_enter(static_cast<wlr_text_input_v3*>(text_input->input), surface);
+                } else {
+                    zwp_text_input_v1_send_enter(text_input->input->resource, surface->resource);
+                }
             } else
             {
                 text_input->set_pending_focused_surface(surface);
@@ -373,13 +449,16 @@ void wf::input_method_relay::set_focus(wlr_surface *surface)
 wf::input_method_relay::~input_method_relay()
 {}
 
-wf::text_input::text_input(wf::input_method_relay *rel, wlr_text_input_v3 *in) :
-    relay(rel), input(in), pending_focused_surface(nullptr)
+wf::text_input::text_input(wf::input_method_relay *rel, text_input_base_t *in, int version) :
+    relay(rel), input(in), tiv_version(version), pending_focused_surface(nullptr)
 {
     on_text_input_enable.set_callback([&] (void *data)
     {
-        auto wlr_text_input = static_cast<wlr_text_input_v3*>(data);
-        assert(input == wlr_text_input);
+        if (tiv_version == 3) {
+            assert(input == static_cast<wlr_text_input_v3*>(data));
+        } else {
+            assert(input == static_cast<wf_text_input_v1*>(data));
+        }
 
         if (relay->input_method == nullptr)
         {
@@ -394,8 +473,11 @@ wf::text_input::text_input(wf::input_method_relay *rel, wlr_text_input_v3 *in) :
 
     on_text_input_commit.set_callback([&] (void *data)
     {
-        auto wlr_text_input = static_cast<wlr_text_input_v3*>(data);
-        assert(input == wlr_text_input);
+        if (tiv_version == 3) {
+            assert(input == static_cast<wlr_text_input_v3*>(data));
+        } else {
+            assert(input == static_cast<wf_text_input_v1*>(data));
+        }
 
         if (!input->current_enabled)
         {
@@ -420,16 +502,25 @@ wf::text_input::text_input(wf::input_method_relay *rel, wlr_text_input_v3 *in) :
 
     on_text_input_disable.set_callback([&] (void *data)
     {
-        auto wlr_text_input = static_cast<wlr_text_input_v3*>(data);
-        assert(input == wlr_text_input);
+        if (tiv_version == 3) {
+            assert(input == static_cast<wlr_text_input_v3*>(data));
+        } else {
+            assert(input == static_cast<wf_text_input_v1*>(data));
+        }
 
         relay->disable_text_input(input);
     });
 
     on_text_input_destroy.set_callback([&] (void *data)
     {
-        auto wlr_text_input = static_cast<wlr_text_input_v3*>(data);
-        assert(input == wlr_text_input);
+        text_input_base_t *wlr_text_input;
+        if (tiv_version == 3) {
+            wlr_text_input = static_cast<wlr_text_input_v3*>(data);
+            assert(input == wlr_text_input);
+        } else {
+            wlr_text_input = static_cast<wf_text_input_v1*>(data);
+            assert(input == wlr_text_input);
+        }
 
         if (input->current_enabled)
         {
@@ -476,7 +567,7 @@ void wf::text_input::set_pending_focused_surface(wlr_surface *surface)
 wf::text_input::~text_input()
 {}
 
-wlr_text_input_v3*wf::input_method_relay::find_focused_text_input_v3()
+text_input_base_t *wf::input_method_relay::find_focused_text_input_v1_v3()
 {
     auto focus = find_focused_text_input();
     return focus ? focus->input : nullptr;

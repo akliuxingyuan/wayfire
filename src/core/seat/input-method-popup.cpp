@@ -37,7 +37,7 @@ std::shared_ptr<wf::text_input_v3_popup> wf::text_input_v3_popup::create(
 
 void wf::text_input_v3_popup::map()
 {
-    auto text_input = this->relay->find_focused_text_input_v3();
+    auto text_input = this->relay->find_focused_text_input_v1_v3();
     if (!text_input)
     {
         LOGE("trying to map IM popup surface without text input.");
@@ -114,7 +114,7 @@ void wf::text_input_v3_popup::update_cursor_rect(wlr_box *cursor_rect)
 
 void wf::text_input_v3_popup::update_geometry()
 {
-    auto text_input = this->relay->find_focused_text_input_v3();
+    auto text_input = this->relay->find_focused_text_input_v1_v3();
     if (!text_input)
     {
         LOGI("no focused text input");
@@ -127,7 +127,12 @@ void wf::text_input_v3_popup::update_geometry()
         return;
     }
 
-    bool cursor_rect = text_input->current.features & WLR_TEXT_INPUT_V3_FEATURE_CURSOR_RECTANGLE;
+    bool cursor_rect;
+    if (text_input->version == 3) {
+        cursor_rect = text_input->current.features & WLR_TEXT_INPUT_V3_FEATURE_CURSOR_RECTANGLE;
+    } else {
+        cursor_rect = true; // text-input-v1
+    }
     auto cursor = text_input->current.cursor_rectangle;
     int x = 0, y = 0;
     if (cursor_rect)

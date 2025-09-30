@@ -184,6 +184,7 @@ class compositor_core_t : public wf::object_base_t, public signal::provider_t
         wlr_pointer_constraints_v1 *pointer_constraints;
         wlr_tablet_manager_v2 *tablet_v2;
         wlr_input_method_manager_v2 *input_method = NULL;
+        text_input_manager_v1 *text_input_v1      = NULL;
         wlr_text_input_manager_v3 *text_input     = NULL;
         wlr_presentation *presentation;
         wlr_primary_selection_v1_device_manager *primary_selection_v1;

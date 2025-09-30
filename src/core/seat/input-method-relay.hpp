@@ -4,6 +4,7 @@
 #include <wayfire/nonstd/wlroots-full.hpp>
 #include <wayfire/unstable/wlr-text-input-v3-popup.hpp>
 #include <wayfire/seat.hpp>
+#include "text-input-unstable-v1-protocol.h"
 
 #include <vector>
 #include <memory>
@@ -16,7 +17,7 @@ class input_method_relay : public text_input_v3_im_relay_interface_t
 {
   private:
 
-    wf::wl_listener_wrapper on_text_input_new,
+    wf::wl_listener_wrapper on_text_input_new, on_text_input_v1_new,
         on_input_method_new, on_input_method_commit, on_input_method_destroy,
         on_grab_keyboard, on_grab_keyboard_destroy, on_new_popup_surface;
     wlr_input_method_keyboard_grab_v2 *keyboard_grab = nullptr;
@@ -49,11 +50,11 @@ class input_method_relay : public text_input_v3_im_relay_interface_t
     std::vector<std::shared_ptr<text_input_v3_popup>> popup_surfaces;
 
     input_method_relay();
-    void send_im_state(wlr_text_input_v3*);
+    void send_im_state(text_input_base_t*);
     text_input *find_focused_text_input();
-    wlr_text_input_v3 *find_focused_text_input_v3() override;
-    void disable_text_input(wlr_text_input_v3*);
-    void remove_text_input(wlr_text_input_v3*);
+    text_input_base_t *find_focused_text_input_v1_v3() override;
+    void disable_text_input(text_input_base_t*);
+    void remove_text_input(text_input_base_t*);
     void remove_popup_surface(text_input_v3_popup*);
     bool handle_key(struct wlr_keyboard*, uint32_t time, uint32_t key, uint32_t state);
     bool handle_modifier(struct wlr_keyboard*);
@@ -64,7 +65,8 @@ class input_method_relay : public text_input_v3_im_relay_interface_t
 struct text_input
 {
     input_method_relay *relay = nullptr;
-    wlr_text_input_v3 *input  = nullptr;
+    text_input_base_t *input  = nullptr;
+    int tiv_version;
     /* A place to keep the focused surface when no input method exists
      * (when the IM returns, it would get that surface instantly) */
     wlr_surface *pending_focused_surface = nullptr;
@@ -72,7 +74,7 @@ struct text_input
         on_text_input_enable, on_text_input_commit,
         on_text_input_disable, on_text_input_destroy;
 
-    text_input(input_method_relay*, wlr_text_input_v3*);
+    text_input(input_method_relay*, text_input_base_t*, int tiv_version);
     void set_pending_focused_surface(wlr_surface*);
     ~text_input();
 };

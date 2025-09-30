@@ -3,6 +3,7 @@
 #include <wayfire/unstable/wlr-surface-node.hpp>
 #include <wayfire/unstable/translation-node.hpp>
 #include <wayfire/nonstd/wlroots-full.hpp>
+#include <wayfire/nonstd/wlroots.hpp>
 #include <wayfire/view.hpp>
 #include <wayfire/signal-definitions.hpp>
 
@@ -11,7 +12,8 @@ namespace wf
 class text_input_v3_im_relay_interface_t : public wf::signal::provider_t
 {
   public:
-    virtual wlr_text_input_v3 *find_focused_text_input_v3() = 0;
+    // virtual wlr_text_input_v3 *find_focused_text_input_v3() = 0;
+    virtual text_input_base_t *find_focused_text_input_v1_v3() = 0;
     virtual ~text_input_v3_im_relay_interface_t() = default;
 };
 

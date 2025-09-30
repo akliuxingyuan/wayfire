@@ -15,6 +15,8 @@
 #include "text-input-v1-v3.hpp"
 #include "input-method-v1.hpp"
 
+struct text_input_manager_v1;
+
 class wayfire_input_method_v1_context
 {
   public:
@@ -36,6 +38,20 @@ class wayfire_input_method_v1_context
         {
             context->deactivate(true);
         }
+    }
+
+    void handle_text_input_v1_commit()
+    {
+        auto ti_v1 = dynamic_cast<wayfire_im_v1_text_input_v1*>(text_input);
+        wf::dassert(ti_v1, "handle_text_input_v1_commit called without text_input_v1");
+        auto text_input_v1 = ti_v1->text_input_v1;
+        zwp_input_method_context_v1_send_content_type(context,
+            text_input_v1->current.content_type.hint, text_input_v1->current.content_type.purpose);
+        zwp_input_method_context_v1_send_surrounding_text(context,
+            text_input_v1->current.surrounding.text ?: "",
+            text_input_v1->current.surrounding.cursor,
+            text_input_v1->current.surrounding.anchor);
+        zwp_input_method_context_v1_send_commit_state(context, ctx_serial++);
     }
 
     void handle_text_input_v3_commit()
@@ -518,10 +534,19 @@ class wayfire_input_method_v1 : public wf::plugin_interface_t, public wf::text_i
         input_panel_manager = wl_global_create(wf::get_core().display, &zwp_input_panel_v1_interface, 1,
             this, handle_bind_im_panel_v1);
 
+        LOGD("if (enable_text_input_v1) ----------------------");
         if (enable_text_input_v1)
         {
-            text_input_v1_manager = wl_global_create(wf::get_core().display,
-                &zwp_text_input_manager_v1_interface, 1, this, handle_bind_text_input_v1);
+            LOGD("enable_text_input_v1 ---------------------- input method v1");
+            wf::get_core().protocols.text_input_v1 = text_input_manager_v1_create(wf::get_core().display);
+            LOGD("enable_text_input_v1 ---------------------- text_input_manager_v1_create");
+
+            on_text_input_v1_created.connect(&wf::get_core().protocols.text_input_v1->events.text_input);
+            LOGD("enable_text_input_v1 ---------------------- connect");
+            on_text_input_v1_created.set_callback([&] (void *data)
+            {
+                handle_text_input_v1_created(static_cast<wf_text_input_v1*>(data));
+            });
         }
 
         if (enable_text_input_v3)
@@ -546,15 +571,6 @@ class wayfire_input_method_v1 : public wf::plugin_interface_t, public wf::text_i
             if (current_im)
             {
                 wl_resource_set_user_data(current_im, NULL);
-            }
-        }
-
-        if (text_input_v1_manager)
-        {
-            wl_global_destroy(text_input_v1_manager);
-            for (auto& [input, _] : im_text_inputs_v1)
-            {
-                wl_resource_set_user_data(input, NULL);
             }
         }
     }
@@ -584,11 +600,47 @@ class wayfire_input_method_v1 : public wf::plugin_interface_t, public wf::text_i
     // Handlers for text-input-v1
 
   private:
-    wl_global *text_input_v1_manager = nullptr;
+    static wf_text_input_v1 *text_input_v1_from_resource(wl_resource *resource) {
+        // assert(wl_resource_instance_of(resource, &zwp_text_input_v1_interface, &context_implementation));
+        return static_cast<wf_text_input_v1*>(wl_resource_get_user_data(resource));
+    }
 
     static void handle_bind_text_input_v1(wl_client *client, void *data, uint32_t version, uint32_t id)
     {
         ((wayfire_input_method_v1*)data)->bind_text_input_v1_manager(client, id);
+    }
+
+    static void handle_display_destroy(wl_listener *listener, void *data) {
+        auto self = static_cast<wayfire_input_method_v1*>(data); //??
+        self->destory();
+    }
+
+    void destory(){
+        wl_signal_emit_mutable(&wf::get_core().protocols.text_input_v1->events.destroy, wf::get_core().protocols.text_input_v1);
+        wl_list_remove(&wf::get_core().protocols.text_input_v1->display_destroy.link);
+        wl_global_destroy(wf::get_core().protocols.text_input_v1->global);
+        for (auto& [input, _] : im_text_inputs_v1)
+        {
+            wl_resource_set_user_data(input->resource, NULL);
+        }
+        delete wf::get_core().protocols.text_input_v1;
+    }
+
+    text_input_manager_v1* text_input_manager_v1_create(wl_display *display) {
+        LOGD("text_input_manager_v1_create -----------------");
+        text_input_manager_v1 *manager = NULL;
+        wl_list_init(&manager->text_inputs);
+        wl_signal_init(&manager->events.text_input);
+        wl_signal_init(&manager->events.destroy);
+
+        auto text_input_v1_manager_global = wl_global_create(wf::get_core().display,
+                &zwp_text_input_manager_v1_interface, 1, this, handle_bind_text_input_v1);
+        manager->global = text_input_v1_manager_global;
+
+        manager->display_destroy.notify = handle_display_destroy;
+        wl_display_add_destroy_listener(display, &manager->display_destroy);
+
+        return manager;
     }
 
     void bind_text_input_v1_manager(wl_client *client, uint32_t id)
@@ -622,7 +674,46 @@ class wayfire_input_method_v1 : public wf::plugin_interface_t, public wf::text_i
         };
 
         wl_resource_set_implementation(ti_resource, &text_input_v1_impl, self, handle_text_input_v1_destroy);
-        self->im_text_inputs_v1[ti_resource] = std::make_unique<wayfire_im_v1_text_input_v1>(ti_resource);
+        auto input = text_input_v1_from_resource(ti_resource);
+        self->im_text_inputs_v1[input] = std::make_unique<wayfire_im_v1_text_input_v1>(input);
+    }
+
+    void handle_text_input_v1_created(wf_text_input_v1 *input)
+    {
+        im_text_inputs_v1[input] = std::make_unique<wayfire_im_v1_text_input_v1>(input);
+
+        im_text_inputs_v1[input]->on_enable.set_callback([=] (void *data)
+        {
+            im_handle_text_input_enable(im_text_inputs_v1[input].get());
+        });
+        im_text_inputs_v1[input]->on_disable.set_callback([=] (void *data)
+        {
+            im_handle_text_input_disable(im_text_inputs_v1[input].get());
+        });
+        im_text_inputs_v1[input]->on_destroy.set_callback([=] (void *data)
+        {
+            handle_text_input_v1_destroyed(input);
+        });
+        im_text_inputs_v1[input]->on_commit.set_callback([=] (void *data)
+        {
+            handle_text_input_v1_commit(input);
+        });
+
+        im_text_inputs_v1[input]->set_focus_surface(last_focus_surface);
+    }
+
+    void handle_text_input_v1_destroyed(wf_text_input_v1 *input)
+    {
+        im_handle_text_input_disable(im_text_inputs_v1[input].get());
+        im_text_inputs_v1.erase(input);
+    }
+
+    void handle_text_input_v1_commit(wf_text_input_v1 *input)
+    {
+        if (current_im_context && (current_im_context->text_input == im_text_inputs_v1[input].get()))
+        {
+            current_im_context->handle_text_input_v1_commit();
+        }
     }
 
     static void handle_text_input_v1_destroy(wl_resource *resource)
@@ -630,16 +721,32 @@ class wayfire_input_method_v1 : public wf::plugin_interface_t, public wf::text_i
         auto self = static_cast<wayfire_input_method_v1*>(wl_resource_get_user_data(resource));
         if (self)
         {
-            self->im_handle_text_input_disable(self->im_text_inputs_v1[resource].get());
-            self->im_text_inputs_v1.erase(resource);
+            wf_text_input_v1* input = NULL;
+            for (auto& [_, im] : self->im_text_inputs_v1)
+            {
+                if (im.get()->text_input_v1->resource == resource)
+                {
+                    input = im.get()->text_input_v1;
+                }
+            }
+            self->im_handle_text_input_disable(self->im_text_inputs_v1[input].get());
+            self->im_text_inputs_v1.erase(input);
         }
     }
 
     static void handle_text_input_v1_activate(wl_client *client, wl_resource *resource, wl_resource *seat,
         wl_resource *surface)
     {
+        wf_text_input_v1* input = NULL;
         auto self = static_cast<wayfire_input_method_v1*>(wl_resource_get_user_data(resource));
-        auto *ti  = self->im_text_inputs_v1[resource].get();
+        for (auto& [_, im] : self->im_text_inputs_v1)
+        {
+            if (im.get()->text_input_v1->resource == resource)
+            {
+                input = im.get()->text_input_v1;
+            }
+        }
+        auto *ti  = self->im_text_inputs_v1[input].get();
 
         if (!ti->can_focus() || (ti->current_focus->resource != surface))
         {
@@ -653,14 +760,22 @@ class wayfire_input_method_v1 : public wf::plugin_interface_t, public wf::text_i
             self->im_handle_text_input_disable(self->current_im_context->text_input);
         }
 
+        input->current_enabled = true;
         self->im_handle_text_input_enable(ti);
     }
 
     static void handle_text_input_v1_deactivate(wl_client *client, wl_resource *resource, wl_resource *seat)
     {
         auto self = static_cast<wayfire_input_method_v1*>(wl_resource_get_user_data(resource));
-        auto *ti  = self->im_text_inputs_v1[resource].get();
-        self->im_handle_text_input_disable(ti);
+        for (auto& [_, im] : self->im_text_inputs_v1)
+        {
+            if (im.get()->text_input_v1->resource == resource)
+            {
+                auto *ti = im.get();
+                ti->text_input_v1->current_enabled = false;
+                self->im_handle_text_input_disable(ti);
+            }
+        }
     }
 
     static void handle_text_input_v1_show_input_panel(wl_client *client, wl_resource *resource)
@@ -780,15 +895,29 @@ class wayfire_input_method_v1 : public wf::plugin_interface_t, public wf::text_i
         }
     }
 
-    wlr_text_input_v3 *find_focused_text_input_v3() override
+    text_input_base_t *find_focused_text_input_v1_v3() override
     {
         if (!current_im_context)
         {
             return nullptr;
         }
 
-        auto as_v3 = dynamic_cast<wayfire_im_v1_text_input_v3*>(current_im_context->text_input);
-        return as_v3 ? as_v3->text_input_v3 : nullptr;
+        for (auto& [_, im] : im_text_inputs_v1)
+        {
+            if(im.get()->dbg_handle == current_im_context->text_input->dbg_handle) {
+                auto as_v1 = dynamic_cast<wayfire_im_v1_text_input_v1*>(current_im_context->text_input);
+                return as_v1 ? as_v1->text_input_v1 : nullptr;
+            }
+        }
+
+        for (auto& [_, im] : im_text_inputs_v3)
+        {
+            if(im.get()->dbg_handle == current_im_context->text_input->dbg_handle) {
+                auto as_v3 = dynamic_cast<wayfire_im_v1_text_input_v3*>(current_im_context->text_input);
+                return as_v3 ? as_v3->text_input_v3 : nullptr;
+            }
+        }
+        return nullptr;
     }
 
     // Implementation of input-method-v1
@@ -916,12 +1045,13 @@ class wayfire_input_method_v1 : public wf::plugin_interface_t, public wf::text_i
     wl_global *input_panel_manager  = NULL;
 
     wl_resource *current_im = NULL;
+    wf::wl_listener_wrapper on_text_input_v1_created;
     wf::wl_listener_wrapper on_text_input_v3_created;
     wlr_surface *last_focus_surface = NULL;
 
     std::unique_ptr<wayfire_input_method_v1_context> current_im_context = NULL;
 
-    std::map<wl_resource*, std::unique_ptr<wayfire_im_v1_text_input_v1>> im_text_inputs_v1;
+    std::map<wf_text_input_v1*, std::unique_ptr<wayfire_im_v1_text_input_v1>> im_text_inputs_v1;
     std::map<wlr_text_input_v3*, std::unique_ptr<wayfire_im_v1_text_input_v3>> im_text_inputs_v3;
 
     void for_each_text_input(std::function<void(wayfire_im_text_input_base_t*)> func)

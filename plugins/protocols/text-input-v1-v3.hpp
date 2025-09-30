@@ -82,89 +82,97 @@ class wayfire_im_text_input_base_t
 class wayfire_im_v1_text_input_v1 : public wayfire_im_text_input_base_t
 {
   public:
-    wayfire_im_v1_text_input_v1(wl_resource *text_input) :
-        wayfire_im_text_input_base_t(wl_resource_get_client(text_input), text_input)
+    wayfire_im_v1_text_input_v1(wf_text_input_v1 *text_input) :
+        wayfire_im_text_input_base_t(wl_resource_get_client(text_input->resource), text_input)
     {
         this->text_input_v1 = text_input;
+        on_enable.connect(&text_input->events.enable);
+        on_disable.connect(&text_input->events.disable);
+        on_destroy.connect(&text_input->events.destroy);
+        on_commit.connect(&text_input->events.commit);
     }
 
     void enable_focus(wlr_surface *surface) override
     {
-        this->enabled = true;
+        zwp_text_input_v1_send_enter(text_input_v1->resource, surface->resource);
     }
 
     void disable_focus() override
     {
-        this->enabled = false;
+        zwp_text_input_v1_send_leave(text_input_v1->resource);
     }
 
     void activate(wlr_surface *surface) override
     {
-        zwp_text_input_v1_send_enter(text_input_v1, surface->resource);
+        zwp_text_input_v1_send_enter(text_input_v1->resource, surface->resource);
     }
 
     void deactivate() override
     {
-        zwp_text_input_v1_send_leave(text_input_v1);
+        zwp_text_input_v1_send_leave(text_input_v1->resource);
     }
 
     void send_commit_string(uint32_t serial, const char *text) override
     {
-        zwp_text_input_v1_send_commit_string(text_input_v1, serial, text);
+        zwp_text_input_v1_send_commit_string(text_input_v1->resource, serial, text);
     }
 
     void send_preedit_string(uint32_t serial, const char *text, const char *commit) override
     {
-        zwp_text_input_v1_send_preedit_string(text_input_v1, serial, text, commit);
+        zwp_text_input_v1_send_preedit_string(text_input_v1->resource, serial, text, commit);
     }
 
     void send_preedit_styling(uint32_t index, uint32_t length, uint32_t style) override
     {
-        zwp_text_input_v1_send_preedit_styling(text_input_v1, index, length, style);
+        zwp_text_input_v1_send_preedit_styling(text_input_v1->resource, index, length, style);
     }
 
     void send_preedit_cursor(int32_t index) override
     {
-        zwp_text_input_v1_send_preedit_cursor(text_input_v1, index);
+        zwp_text_input_v1_send_preedit_cursor(text_input_v1->resource, index);
     }
 
     void send_delete_surrounding_text(int32_t index, uint32_t length) override
     {
-        zwp_text_input_v1_send_delete_surrounding_text(text_input_v1, index, length);
+        zwp_text_input_v1_send_delete_surrounding_text(text_input_v1->resource, index, length);
     }
 
     void send_cursor_position(int32_t index, int32_t anchor) override
     {
-        zwp_text_input_v1_send_cursor_position(text_input_v1, index, anchor);
+        zwp_text_input_v1_send_cursor_position(text_input_v1->resource, index, anchor);
     }
 
     void send_modifiers_map(struct wl_array *map) override
     {
-        zwp_text_input_v1_send_modifiers_map(text_input_v1, map);
+        zwp_text_input_v1_send_modifiers_map(text_input_v1->resource, map);
     }
 
     void send_keysym(uint32_t serial, uint32_t time, uint32_t sym, uint32_t state,
         uint32_t modifiers) override
     {
-        zwp_text_input_v1_send_keysym(text_input_v1, serial, time, sym, state, modifiers);
+        zwp_text_input_v1_send_keysym(text_input_v1->resource, serial, time, sym, state, modifiers);
     }
 
     void send_language(uint32_t serial, const char *language) override
     {
-        zwp_text_input_v1_send_language(text_input_v1, serial, language);
+        zwp_text_input_v1_send_language(text_input_v1->resource, serial, language);
     }
 
     void send_text_direction(uint32_t serial, uint32_t direction) override
     {
-        zwp_text_input_v1_send_text_direction(text_input_v1, serial, direction);
+        zwp_text_input_v1_send_text_direction(text_input_v1->resource, serial, direction);
     }
 
-    wl_resource *text_input_v1;
-    bool enabled = false;
+    wf_text_input_v1 *text_input_v1 = NULL;
+
+    wf::wl_listener_wrapper on_enable;
+    wf::wl_listener_wrapper on_disable;
+    wf::wl_listener_wrapper on_destroy;
+    wf::wl_listener_wrapper on_commit;
 
     bool can_focus() const
     {
-        return enabled;
+        return text_input_v1->current_enabled;
     }
 };
 
