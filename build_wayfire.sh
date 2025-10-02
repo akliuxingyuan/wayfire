@@ -8,4 +8,4 @@ arch-meson \
     -Db_pie=true \
     -Dtests=disabled \
     build
-ninja -C build
+ninja -C build && sudo ninja -C build install

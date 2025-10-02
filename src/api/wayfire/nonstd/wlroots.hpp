@@ -158,7 +158,7 @@ extern "C"
 
         struct {
             struct wl_signal text_input; // struct wf_text_input_v1
-            struct wl_signal destroy; // struct input_method_manager_v1
+            struct wl_signal destroy; // struct text_input_manager_v1
         } events;
     };
 
@@ -173,7 +173,7 @@ extern "C"
 
         struct {
             struct wl_signal text_input; // struct wlr_text_input_v3
-            struct wl_signal destroy; // struct wlr_input_method_manager_v3
+            struct wl_signal destroy; // struct wlr_text_input_manager_v3
         } events;
     };
 

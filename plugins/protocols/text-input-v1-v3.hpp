@@ -86,30 +86,51 @@ class wayfire_im_v1_text_input_v1 : public wayfire_im_text_input_base_t
         wayfire_im_text_input_base_t(wl_resource_get_client(text_input->resource), text_input)
     {
         this->text_input_v1 = text_input;
+        LOGI("this->text_input_v1 = text_input;");
         on_enable.connect(&text_input->events.enable);
         on_disable.connect(&text_input->events.disable);
         on_destroy.connect(&text_input->events.destroy);
         on_commit.connect(&text_input->events.commit);
     }
 
+    ~wayfire_im_v1_text_input_v1()
+    {
+        wl_list_remove(&text_input_v1->surface_destroy.link);
+        wl_list_remove(&text_input_v1->seat_destroy.link);
+        wl_list_remove(&text_input_v1->link);
+        delete text_input_v1->current.surrounding.text;
+        delete text_input_v1->pending.surrounding.text;
+        delete text_input_v1;
+    }
+
     void enable_focus(wlr_surface *surface) override
     {
+        text_input_v1->focused_surface = surface;
+        wl_signal_add(&text_input_v1->focused_surface->events.destroy, &text_input_v1->surface_destroy);
         zwp_text_input_v1_send_enter(text_input_v1->resource, surface->resource);
     }
 
     void disable_focus() override
     {
         zwp_text_input_v1_send_leave(text_input_v1->resource);
+        wl_list_remove(&text_input_v1->surface_destroy.link);
+	    wl_list_init(&text_input_v1->surface_destroy.link);
+        text_input_v1->focused_surface = nullptr;
     }
 
     void activate(wlr_surface *surface) override
     {
+        text_input_v1->focused_surface = surface;
+        wl_signal_add(&text_input_v1->focused_surface->events.destroy, &text_input_v1->surface_destroy);
         zwp_text_input_v1_send_enter(text_input_v1->resource, surface->resource);
     }
 
     void deactivate() override
     {
         zwp_text_input_v1_send_leave(text_input_v1->resource);
+        wl_list_remove(&text_input_v1->surface_destroy.link);
+	    wl_list_init(&text_input_v1->surface_destroy.link);
+        text_input_v1->focused_surface = nullptr;
     }
 
     void send_commit_string(uint32_t serial, const char *text) override
@@ -187,6 +208,16 @@ class wayfire_im_v1_text_input_v3 : public wayfire_im_text_input_base_t
         on_disable.connect(&text_input->events.disable);
         on_destroy.connect(&text_input->events.destroy);
         on_commit.connect(&text_input->events.commit);
+    }
+
+    ~wayfire_im_v1_text_input_v3()
+    {
+        wl_list_remove(&text_input_v3->surface_destroy.link);
+        wl_list_remove(&text_input_v3->seat_destroy.link);
+        wl_list_remove(&text_input_v3->link);
+        delete text_input_v3->current.surrounding.text;
+        delete text_input_v3->pending.surrounding.text;
+        delete text_input_v3;
     }
 
     void enable_focus(wlr_surface *surface) override
