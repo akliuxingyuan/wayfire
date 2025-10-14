@@ -149,7 +149,7 @@ void wf::cursor_t::init_cursor_shape_manager()
     cursor_shape_manager = wlr_cursor_shape_manager_v1_create(seat->seat->display, 1);
     request_set_cursor_shape.set_callback([&] (void *data)
     {
-        auto event = (wlr_cursor_shape_manager_v1_request_set_shape_event *)data;
+        auto event = (wlr_cursor_shape_manager_v1_request_set_shape_event*)data;
         const char *shape_name = wlr_cursor_shape_v1_name(event->shape);
         struct wlr_seat_client *focused_client = seat->seat->pointer_state.focused_client;
 
